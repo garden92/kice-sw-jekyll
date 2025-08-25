@@ -428,6 +428,56 @@ Eclipse MAT 설치: https://www.eclipse.org/mat/
 - -Xms, -Xmx는 절대값 기준
 - -XX:XXXPercentage는 컨테이너 제한 메모리 비율 기준
 
+##### 추가) JVM 힙메모리 설정 방식
+1) 전통적인 방식 (-Xms, -Xmx)
+
+- `Xms1g -Xmx1g`
+- **Xms**: 초기 힙 메모리 크기
+- **Xmx**: 최대 힙 메모리 크기
+
+2) 컨테이너 환경용 퍼센테이지 방식
+
+`XX:InitialRAMPercentage=30.0
+-XX:MinRAMPercentage=50.0
+-XX:MaxRAMPercentage=80.0`
+
+3) 퍼센테이지 옵션 의미
+**InitialRAMPercentage**
+
+- JVM 시작 시 초기 힙 메모리 비율
+- 컨테이너 메모리의 30% = 약 300MB
+
+**MaxRAMPercentage**
+
+- 최대 힙 메모리 비율
+- 컨테이너 메모리의 80% = 약 800MB
+
+**MinRAMPercentage** ⚠️
+
+- **250MB 미만 환경**에서만 유효
+- 250MB 미만 환경에서는
+    - MinRAMPercentage 설정을 보고 이걸 힙 메모리 최대 크기로 제한
+    - MaxRAMPercentage 설정은 무시됨
+    - 즉, 소형 시스템에서의 최대 힙 크기
+- 250MB 이상 환경에서는
+    - MaxRAMPercentage 설정을 보고 이걸 힙 메모리 최대 크기로 제한
+    - MinRAMPercentage 설정은 무시됨
+- 1GB 환경에서는 **무효한 옵션**
+
+4) 컨테이너 환경 특별 고려사항
+- OOMKilled 위험
+```yaml
+resources:
+  limits:
+    memory: "1Gi"  *# 컨테이너 전체 메모리*
+env:
+  - name: JAVA_OPTS
+    value: "-Xms1g -Xmx1g"  *# 힙만 1GB*
+```
+
+힙 외에 **non-heap 메모리**(메타스페이스, 스택, 직접 메모리) 때문에 OOMKilled 발생 가능
+
+
 #### Kubernetes Pod 메모리 설정 + JVM 튜닝 예제
 
 ```yaml
@@ -2538,6 +2588,28 @@ spring:
 ---
 
 ## Kafka 설계 시 고려사항
+
+### 추가) kafka Topic에 대하여
+- 참고자료) https://www.youtube.com/watch?v=7QfEpRTRdIQ
+- 카프카 토픽은 데이터베이스의 테이블 내지는 폴더와 같다.
+- 토픽의 내부에는 파티션이 존재하며, 데이터는 큐 형태로 순차적으로 쌓이고, 컨슈머는 이를 순차적으로 가져온다.
+- 컨슈머가 데이터를 가져가더라도 데이터는 삭제되지 않는다. 파티션에 그대로 남아있다.
+- **다른 컨슈머 그룹에 있는 컨슈머**가 동일한 데이터를 중복해서 가져갈 수 있다.
+    - 반드시 다른 컨슈머 그룹에 있어야 하며
+    - [auto.offset.rest](http://auto.offset.rest) = eariest여야 한다.
+- 파티션이 2개 이상인 경우
+    - Producer가 데이터를 보낼때 키를 지정하지 않으면 round robin으로 할당됨
+    - 키가 있고, 기본 파티셔너 사용할 경우, 키의 해시를 구하고 특정 파티션에 할당
+    - 파티션 늘리는건 가능하지만 다시 줄일 수는 없다.
+- 파티션을 늘리는 이유
+    - 파티션을 늘리면 컨슈머 개수를 늘려서 데이터 처리를 분산시킬 수 있다.
+        - 파티션당 최대 1개의 컨슈머만 할당 가능
+- 데이터는 언제 삭제되는가?
+    - 옵션에 따라 다름 → 레코드가 저장되는 최대 시간과 크기 지정
+    - [log.retention.ms](http://log.retention.ms) : 최대 record 보존 시간
+    - log.retention.byte : 최대 record 보존 크기
+
+
 
 ### 참고 문서
 
